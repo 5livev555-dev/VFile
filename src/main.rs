@@ -11,6 +11,8 @@ struct VFile {
     status: String,
     selected: Option<PathBuf>,
     confirm_delete: bool,
+    rename_input: String,
+    rename_dialog: bool,
 }
 
 struct Entry { path: PathBuf, is_dir: bool, size: u64 }
@@ -18,7 +20,7 @@ struct Entry { path: PathBuf, is_dir: bool, size: u64 }
 impl VFile {
     fn new() -> Self {
         let current = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let mut app = Self { current, entries: Vec::new(), search: String::new(), status: String::new(), selected: None, confirm_delete: false };
+        let mut app = Self { current, entries: Vec::new(), search: String::new(), status: String::new(), selected: None, confirm_delete: false, rename_input: String::new(), rename_dialog: false };
         app.refresh();
         app
     }
@@ -79,6 +81,34 @@ impl VFile {
         }
         self.confirm_delete = false;
     }
+
+    fn rename_selected(&mut self) {
+        let Some(old_path) = self.selected.clone() else { return; };
+        let name = self.rename_input.trim();
+        if name.is_empty() || name == "." || name == ".." || name.chars().any(|c| matches!(c, '/' | '\\' | '<' | '>' | ':' | '"' | '|' | '?' | '*')) || name.ends_with([' ', '.']) {
+            self.status = "Вкажіть допустиму назву без символів шляху".into();
+            return;
+        }
+        if old_path.parent() != Some(self.current.as_path()) {
+            self.status = "Вибраний елемент не належить цій папці".into();
+            self.rename_dialog = false;
+            return;
+        }
+        let new_path = self.current.join(name);
+        if new_path != old_path && new_path.exists() {
+            self.status = "Елемент із такою назвою вже існує".into();
+            return;
+        }
+        match fs::rename(&old_path, &new_path) {
+            Ok(()) => {
+                self.status = format!("Перейменовано на «{name}»");
+                self.selected = Some(new_path);
+                self.rename_dialog = false;
+                self.refresh();
+            }
+            Err(e) => self.status = format!("Не вдалося перейменувати: {e}"),
+        }
+    }
 }
 
 impl eframe::App for VFile {
@@ -105,11 +135,17 @@ impl eframe::App for VFile {
             let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
             let desktop = dirs::desktop_dir().unwrap_or_else(|| home.join("Desktop"));
             let downloads = dirs::download_dir().unwrap_or_else(|| home.join("Downloads"));
-            let root = if cfg!(windows) { std::env::var_os("SystemDrive").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("C:\\")) } else { PathBuf::from("/") };
+            // `C:` is drive-relative on Windows; `C:\` is the drive root.
+            let root = if cfg!(windows) {
+                let drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".into());
+                PathBuf::from(format!("{}\\", drive.trim_end_matches(['\\', '/'])))
+            } else {
+                PathBuf::from("/")
+            };
             for (label, icon, path) in [("Домівка", "⌂", home), ("Робочий стіл", "▦", desktop), ("Завантаження", "↓", downloads), ("Корінь диска", "▣", root)] {
                 if ui.selectable_label(self.current == path, format!("{icon}  {label}")).clicked() { self.navigate(path); }
             }
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| { ui.label(egui::RichText::new("VFile • 0.1.0").small().weak()); });
+            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| { ui.label(egui::RichText::new("VFile • 1.1").small().weak()); });
         });
 
         egui::CentralPanel::default().frame(egui::Frame::new().fill(egui::Color32::from_rgb(19, 22, 28)).inner_margin(egui::Margin::symmetric(24, 20))).show(ui, |ui| {
@@ -119,6 +155,10 @@ impl eframe::App for VFile {
                 ui.label(egui::RichText::new(self.current.display().to_string()).weak());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.add_enabled(self.selected.is_some(), egui::Button::new("⌫ Видалити")).clicked() { self.confirm_delete = true; }
+                    if ui.add_enabled(self.selected.is_some(), egui::Button::new("Перейменувати")).clicked() {
+                        self.rename_input = self.selected.as_ref().and_then(|p| p.file_name()).unwrap_or_default().to_string_lossy().to_string();
+                        self.rename_dialog = true;
+                    }
                     if ui.button("＋ .txt файл").clicked() { self.create_text_file(); }
                     if ui.button("＋ Нова папка").clicked() { self.create_folder(); }
                 });
@@ -164,6 +204,19 @@ impl eframe::App for VFile {
                 ui.horizontal(|ui| {
                     if ui.button("Видалити").clicked() { self.delete_selected(); }
                     if ui.button("Скасувати").clicked() { self.confirm_delete = false; }
+                });
+            });
+        }
+
+        if self.rename_dialog {
+            egui::Window::new("Перейменувати").collapsible(false).resizable(false).show(ui.ctx(), |ui| {
+                ui.label("Нова назва:");
+                let input = ui.text_edit_singleline(&mut self.rename_input);
+                let enter = input.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                ui.horizontal(|ui| {
+                    let rename = ui.button("Зберегти").clicked() || enter;
+                    if rename { self.rename_selected(); }
+                    if ui.button("Скасувати").clicked() { self.rename_dialog = false; }
                 });
             });
         }
