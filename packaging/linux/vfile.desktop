@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=VFile
+GenericName=File Manager
+Comment=Modern cross-platform file manager
+Exec=vfile
+Icon=vfile
+Terminal=false
+Categories=Utility;FileManager;
+StartupNotify=true

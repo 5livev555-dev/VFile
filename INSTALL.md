@@ -45,3 +45,5 @@ cargo run
 ```
 
 На Windows ті самі команди працюють у PowerShell.
+
+Збірка Windows з GitHub Actions вбудовує логотип `assets/logo.ico` у `vfile.exe`. Для Linux ярлик у меню програм можна встановити командами з README; вони копіюють застосунок у `~/.local/bin`, файл ярлика `.desktop` та SVG-іконку у каталоги поточного користувача.
